@@ -1,0 +1,256 @@
+name: Build APK
+
+on:
+  repository_dispatch:
+    types: [build_apk]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build tools
+        run: |
+          sdkmanager "build-tools;34.0.0" "platforms;android-34"
+
+      - name: Create project structure
+        run: |
+          mkdir -p project/src/com/mahmod/app
+          mkdir -p project/res/values
+          mkdir -p project/res/drawable
+          mkdir -p project/assets
+          mkdir -p project/build/classes
+          mkdir -p project/build/dex
+          mkdir -p project/build/apk
+
+      - name: Write HTML content
+        run: |
+          cat > project/assets/index.html << 'HTMLEOF'
+          ${{ github.event.client_payload.html_content }}
+          HTMLEOF
+
+      - name: Write icon
+        run: |
+          if [ -n "${{ github.event.client_payload.icon_base64 }}" ]; then
+            echo "${{ github.event.client_payload.icon_base64 }}" | base64 -d > project/res/drawable/icon.png
+          else
+            # آیکون پیش‌فرض اگه کاربر آپلود نکرده
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > project/res/drawable/icon.png
+          fi
+
+      - name: Write AndroidManifest.xml
+        run: |
+          cat > project/AndroidManifest.xml << 'MANIFESTEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="${{ github.event.client_payload.package_name }}"
+              android:versionCode="1"
+              android:versionName="1.0">
+              <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <application
+                  android:label="${{ github.event.client_payload.app_name }}"
+                  android:icon="@drawable/icon"
+                  android:theme="@android:style/Theme.NoTitleBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFESTEOF
+
+      - name: Write strings.xml
+        run: |
+          cat > project/res/values/strings.xml << 'STRINGSEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">${{ github.event.client_payload.app_name }}</string>
+          </resources>
+          STRINGSEOF
+
+      - name: Write MainActivity.java
+        run: |
+          mkdir -p project/src/com/mahmod/app
+          cat > project/src/com/mahmod/app/MainActivity.java << 'JAVAEOF'
+          package com.mahmod.app;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView webView;
+              private ValueCallback<Uri[]> filePathCallback;
+              private static final int FILE_CHOOSER_REQUEST = 100;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  webView = new WebView(this);
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
+                  s.setAllowFileAccessFromFileURLs(true);
+                  s.setAllowUniversalAccessFromFileURLs(true);
+                  s.setLoadWithOverviewMode(true);
+                  s.setUseWideViewPort(true);
+
+                  webView.setWebViewClient(new WebViewClient());
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(WebView wv,
+                              ValueCallback<Uri[]> callback,
+                              FileChooserParams params) {
+                          if (filePathCallback != null) {
+                              filePathCallback.onReceiveValue(null);
+                          }
+                          filePathCallback = callback;
+                          Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                          intent.addCategory(Intent.CATEGORY_OPENABLE);
+                          intent.setType("image/*");
+                          try {
+                              startActivityForResult(
+                                  Intent.createChooser(intent, "انتخاب عکس"),
+                                  FILE_CHOOSER_REQUEST
+                              );
+                          } catch (Exception e) {
+                              filePathCallback = null;
+                              return false;
+                          }
+                          return true;
+                      }
+                  });
+
+                  webView.loadUrl("file:///android_asset/index.html");
+                  setContentView(webView);
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  if (requestCode == FILE_CHOOSER_REQUEST) {
+                      if (filePathCallback == null) return;
+                      Uri[] results = null;
+                      if (resultCode == Activity.RESULT_OK && data != null) {
+                          if (data.getDataString() != null) {
+                              results = new Uri[]{ Uri.parse(data.getDataString()) };
+                          }
+                      }
+                      filePathCallback.onReceiveValue(results);
+                      filePathCallback = null;
+                  } else {
+                      super.onActivityResult(requestCode, resultCode, data);
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+          }
+          JAVAEOF
+
+      - name: Compile resources
+        run: |
+          cd project
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          AJ=$ANDROID_HOME/platforms/android-34/android.jar
+          $BT/aapt2 compile --dir res -o build/res.zip
+          $BT/aapt2 link -o build/apk/base.apk -I $AJ \
+            --manifest AndroidManifest.xml \
+            -R build/res.zip
+
+      - name: Compile Java
+        run: |
+          cd project
+          AJ=$ANDROID_HOME/platforms/android-34/android.jar
+          javac -source 1.8 -target 1.8 -cp $AJ \
+            -d build/classes \
+            src/com/mahmod/app/MainActivity.java
+
+      - name: Convert to DEX
+        run: |
+          cd project
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          $BT/d8 --min-api 21 --output build/dex \
+            build/classes/com/mahmod/app/*.class
+
+      - name: Package APK
+        run: |
+          cd project/build/apk
+          cp ../dex/classes.dex .
+          cp -r ../../assets assets
+          zip -r base.apk classes.dex assets
+
+      - name: Zipalign
+        run: |
+          cd project/build/apk
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          $BT/zipalign -f 4 base.apk aligned.apk
+
+      - name: Sign APK
+        run: |
+          cd project/build/apk
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          keytool -genkey -v -keystore test.keystore -alias test \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass 123456 -keypass 123456 \
+            -dname "CN=Mahmod"
+          $BT/apksigner sign --ks test.keystore --ks-pass pass:123456 \
+            --min-sdk-version 21 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --out final.apk aligned.apk
+
+      - name: Rename APK
+        run: |
+          cd project/build/apk
+          SAFE_NAME=$(echo "${{ github.event.client_payload.app_name }}" | tr ' ' '_' | tr -cd '[:alnum:]_-')
+          cp final.apk "${SAFE_NAME}.apk"
+          echo "APK_NAME=${SAFE_NAME}.apk" >> $GITHUB_ENV
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-output
+          path: project/build/apk/final.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: ${{ github.event.client_payload.app_name }}
+          files: project/build/apk/final.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
