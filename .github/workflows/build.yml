@@ -189,6 +189,7 @@ jobs:
           $BT/aapt2 compile --dir res -o build/res.zip
           $BT/aapt2 link -o build/apk/base.apk -I $AJ \
             --manifest AndroidManifest.xml \
+            --auto-add-overlay \
             -R build/res.zip
 
       - name: Compile Java
