@@ -32,6 +32,8 @@ jobs:
           mkdir -p project/res/drawable
           mkdir -p project/assets
           mkdir -p project/build/apk
+          mkdir -p project/build/dex
+          mkdir -p project/build/classes
 
       - name: Write HTML content
         run: |
@@ -119,15 +121,22 @@ jobs:
           cd project
           BT=$ANDROID_HOME/build-tools/34.0.0
           AJ=$ANDROID_HOME/platforms/android-34/android.jar
+          
+          mkdir -p build/apk
+          mkdir -p build/dex
+          mkdir -p build/classes
+          
           $BT/aapt2 compile --dir res -o build/res.zip
           $BT/aapt2 link -o build/apk/base.apk -I $AJ --manifest AndroidManifest.xml --auto-add-overlay -R build/res.zip
           javac -source 1.8 -target 1.8 -cp $AJ -d build/classes src/com/mahmod/app/MainActivity.java
           $BT/d8 --min-api 21 --output build/dex build/classes/com/mahmod/app/*.class
+          
           cd build/apk
           cp ../dex/classes.dex .
           cp -r ../../assets assets
           zip -r base.apk classes.dex assets
           $BT/zipalign -f 4 base.apk aligned.apk
+          
           keytool -genkey -v -keystore test.keystore -alias test -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=Mahmod"
           $BT/apksigner sign --ks test.keystore --ks-pass pass:123456 --min-sdk-version 21 --out final.apk aligned.apk
 
