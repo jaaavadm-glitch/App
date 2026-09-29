@@ -61,10 +61,14 @@ jobs:
 
       - name: Write icon
         run: |
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > project/res/drawable/icon.png
           if [ -n "${{ github.event.client_payload.icon_base64 }}" ]; then
-            echo "${{ github.event.client_payload.icon_base64 }}" | base64 -d > project/res/drawable/icon.png
-          else
-            printf '\x89PNG\r\n\x1a\n' > project/res/drawable/icon.png
+            echo "${{ github.event.client_payload.icon_base64 }}" | base64 -d > /tmp/user_icon.png 2>/dev/null
+            if file /tmp/user_icon.png 2>/dev/null | grep -q "PNG"; then
+              if [ $(wc -c < /tmp/user_icon.png) -gt 100 ]; then
+                cp /tmp/user_icon.png project/res/drawable/icon.png
+              fi
+            fi
           fi
 
       - name: Write manifest
